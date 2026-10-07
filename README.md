@@ -195,6 +195,7 @@ npm start
    - **停排前的有效双签（执行人就绪 + 舞监可执行）整体失效并保留失效原因**，恢复后**须双方重签**才能登记开始；
    - **执行账号**的开始 / 预计结束 / 完成登记与**新签认一律拒绝**（409 `INTERRUPTION_ACTIVE`），**发布新版也须先恢复**（409 `INTERRUPTION_ACTIVE`）；
    - **舞监更正、依赖链跳过仍可办理**；但**更正后的实际开始 / 实际完成不得落入任何停排区间**（半开 `[停排, 恢复)`，400 `INTERRUPTION_TIME_CONFLICT`）；
+   - **恢复后岗位补填同样受区间约束（本轮新增）**：恢复联排后，岗位可手填已结束停排区间内的实际时刻，但**实际开始 / 实际完成一旦落入该版任一段停排区间（半开 `[停排, 恢复)`，含已恢复的历史段），登记整体拒绝**（400 `INTERRUPTION_TIME_CONFLICT`，响应说明冲突时刻与所在停排段）；**停排起点不可登记、恢复时刻可登记**；**起止时刻均在段外、执行过程跨越停排的登记允许**（复盘仍按既有规则扣除实际起止与停排段的交集）；预计结束是计划值、不做区间拦截；
 3. **恢复**：填写严格晚于停排时刻的 **HH:MM 恢复时刻**（重复恢复 409 `NO_ACTIVE_INTERRUPTION`；恢复时刻同样不得覆盖已登记实际时刻）。恢复**不改写任何实际登记时间**，而是按规则重算：
    - **未开始项**重算开始**不得早于最近恢复时刻**（停排进行中则暂以本次停排时刻为最早开始），其被清除的预计结束**不自动恢复**；
    - **已开始未完成项**的**按时长推算结束**与**停排前填写的预计结束****顺延实际开始之后各段中断的整段分钟**，且**不得早于最近恢复时刻**；实际开始时间保持不变；
@@ -253,6 +254,7 @@ npm start
 - **代班识别**：若你被指定为某岗位代班，页面顶部黄色横幅提示「你正在代班岗位…」，该岗位行同样高亮并可登记（自己原有岗位权限保留）；若你的岗位被他人代班，横幅提示登记权已移交，本岗位行显示「已由 XX 代班」且不再出现操作按钮；
 - 非本岗位提示项只读；对非最新（已归档）版本不能登记；
 - **联排停排期间本岗位行显示「⛔ 停排中，暂停登记」**：开始 / 预计结束 / 完成提交均会被拒绝（409），新签认也暂停；恢复联排后排期自动顺延（未开始项不早于恢复时刻），停排前的放行双签已失效，**需双方重新签认**后才能开始需放行项；
+- **恢复后补填实际时刻（本轮新增）**：恢复后可在开始 / 完成输入框手填实际发生时刻。手填的**实际开始 / 实际完成不得落入该版任一段停排区间**（半开 `[停排, 恢复)`，**停排起点不可登记、恢复时刻可以**），否则页面红条提示 400 `INTERRUPTION_TIME_CONFLICT`（说明冲突时刻与停排段），**改填段外时刻重试即可**——拒绝不会改动已登记内容、行版本、放行签认或顺延待确认；**执行过程跨越停排（开始在停排前、完成在恢复后）属正常登记**，复盘自动扣除停排交集；预计结束为计划值，不受此限制；
 - 已完成项保留实际时间不再变化；未开始项按前置链重算，**重算开始不早于原计划**；
 - **被舞监标记为跳过的提示项只读展示（紫色「已跳过」），无登记按钮**，跳过项不计入待执行时段与岗位冲突，其后继只按未跳过前置重算；
 - 顺延产生的同岗位时段冲突在页面顶部红色横幅逐条展示，同时相关行标注「已顺延」；
@@ -330,7 +332,7 @@ SESSION_SECRET=your-long-random-secret
 | POST | `/api/live/deputies` | 舞监 | 启用岗位代班（仅当前执行版）；重复启用 409 `DEPUTY_EXISTS`；同事务使失去登记权者的签认失效 |
 | POST | `/api/live/deputies/revoke` | 舞监 | 撤销岗位在任代班；无在任代班 409 `NO_ACTIVE_DEPUTY`；同事务使失去登记权者的签认失效 |
 | POST | `/api/live/signoffs` | 执行岗位 / 舞监 | **双人放行签认**（仅当前执行版、需放行且未开始项）：`kind=operator` 执行人签认就绪（须当下有该岗位登记权）、`kind=sm` 舞监签认可执行；记录签认人、时间及目标与直接前置项登记行版本快照；重复签认 409 `SIGNOFF_EXISTS`，已开始/完成 409 `SIGNOFF_STATE`，已跳过 409 `CUE_SKIPPED`，未标记需放行 400 `RELEASE_NOT_REQUIRED`，**停排期间 409 `INTERRUPTION_ACTIVE`** |
-| POST | `/api/registrations` | 执行岗位 | start / complete / estimate（同一事务内复核当前版、代班授权、行版本号；已跳过项 409 `CUE_SKIPPED`；需放行项 start 前须双签齐备，否则 409 `SIGNOFF_MISSING`；**停排期间 start/estimate/complete 均 409 `INTERRUPTION_ACTIVE`**；**estimate 下界：已开始项为实际开始，未开始项为提交时该项重算开始——倒挂重报早于重算开始返回 400 `BAD_INPUT`（附 `lowerBound/lowerBoundText`），整体拒绝、不产生登记或顺延确认记录**） |
+| POST | `/api/registrations` | 执行岗位 | start / complete / estimate（同一事务内复核当前版、代班授权、行版本号；已跳过项 409 `CUE_SKIPPED`；需放行项 start 前须双签齐备，否则 409 `SIGNOFF_MISSING`；**停排期间 start/estimate/complete 均 409 `INTERRUPTION_ACTIVE`**；**恢复后手填的实际开始 / 实际完成不得落入该版任一段停排区间（含已结束段，半开 `[停排, 恢复)`：停排起点拒绝、恢复时刻允许；起止均在段外但跨越停排允许），否则 400 `INTERRUPTION_TIME_CONFLICT`，附 `conflictTime/pauseText/resumeText/interruptionId`，整体拒绝且登记、行版本、双签效力、顺延待确认与更正历史均不变；estimate 不做区间拦截**；**estimate 下界：已开始项为实际开始，未开始项为提交时该项重算开始——倒挂重报早于重算开始返回 400 `BAD_INPUT`（附 `lowerBound/lowerBoundText`），整体拒绝、不产生登记或顺延确认记录**） |
 | POST | `/api/registrations/corrections` | 舞监 | 更正/清除单个登记字段（校验行版本号、仅当前执行版本；级联清除与一致性校验；原子写入更正历史；已跳过项 409 `CUE_SKIPPED`；**更正后的实际时刻落入任一段停排区间 400 `INTERRUPTION_TIME_CONFLICT`；停排期间仍可更正**） |
 | GET | `/api/live/skips/preview` | 舞监 | **依赖链跳过影响预览**（仅当前执行版）：根项及沿前置可达的全部后继、各项行版本、阻断项与已跳过原因 |
 | POST | `/api/live/skips` | 舞监 | **确认跳过整条依赖链**（非空原因 + 预览所见行版本；事务内核验，阻断/版本变化整体拒绝；首跳清除预计结束并留痕，已跳过项不重复留痕） |
@@ -1100,6 +1102,35 @@ curl -b sm.cookie -s -X POST http://localhost:3000/api/registrations/corrections
 # 舞监更正为停排前时刻仍可办理；依赖链跳过也可办理。
 ```
 
+### 2b. 恢复后岗位补填停排区间内时刻（本轮新增）
+
+舞监恢复联排（如 20:25）后，执行岗位可在开始 / 完成输入框手填**实际发生时刻**；但手填的实际开始 / 实际完成不得落入该版**任一段停排区间**（含已恢复的历史段，半开 `[停排, 恢复)`）：
+
+```bash
+# 恢复后补填区间内的实际完成 20:14（停排段 20:13–20:25）→ 400
+curl -b light.cookie -s -X POST http://localhost:3000/api/registrations \
+  -H 'Content-Type: application/json' \
+  -d '{"versionId":1,"cueRef":1,"rowVersion":3,"action":"complete","time":"20:14"}'
+# {"error":"INTERRUPTION_TIME_CONFLICT",
+#  "message":"实际完成 20:14 落入联排停排区间（20:13–20:25，半开区间：停排起点不可登记、恢复时刻可登记），停排期间没有实际执行，请改为停排前或恢复后的时刻后重新提交",
+#  "conflictTime":"20:14","conflictMinute":1214,
+#  "pauseText":"20:13","resumeText":"20:25","interruptionId":3}
+
+# 停排起点 20:13 同样拒绝（半开开在停排侧）；恢复时刻 20:25 允许登记
+curl -b light.cookie -s -X POST http://localhost:3000/api/registrations \
+  -H 'Content-Type: application/json' \
+  -d '{"versionId":1,"cueRef":1,"rowVersion":3,"action":"complete","time":"20:25"}'
+# 200：成功，响应结构与既有登记完全一致（{version:…}）
+
+# 开始在停排前、完成在恢复后（执行跨越停排）允许登记：
+# 某提示项 20:00 已开始，20:30 完成，中间 20:13–20:25 停排 → 200；
+# 复盘仍按既有规则扣除实际起止 [20:00,20:30) 与停排段 [20:13,20:25) 的交集 12 分钟。
+
+# 预计结束为计划值，不做停排区间拦截（仍只校验不早于实际开始 / 当前重算开始）
+```
+
+拒绝发生在登记写事务内、任何写入之前：`GET /api/live` 中该行**状态、实际时刻、`rowVer` 不变**，放行签认效力不变，`/api/live/change-notices` 不新增记录，更正历史不新增；页面红条显示错误后**改填段外时刻直接重试**，无需刷新。
+
 ### 3. 恢复：补记恢复时刻，排期自动顺延
 
 ```bash
@@ -1167,6 +1198,7 @@ curl -b sm.cookie -s http://localhost:3000/api/versions/1
 | 停排时刻/恢复时刻非 HH:MM、原因空或超 200 字 | 400 | `BAD_INPUT` |
 | 时刻不严格递增（≤ 最近恢复 / ≤ 停排） | 400 | `INTERRUPTION_TIME_INVALID` |
 | 停排/恢复/更正时刻覆盖或落入停排区间 | 400 | `INTERRUPTION_TIME_CONFLICT`（`items` 逐项列出） |
+| 恢复后岗位补填的实际开始 / 实际完成落入任一段停排区间（半开，含已结束段） | 400 | `INTERRUPTION_TIME_CONFLICT`（附 `conflictTime/pauseText/resumeText/interruptionId`；停排起点拒绝、恢复时刻允许；跨越停排的起止不拦截） |
 | 同版已有进行中停排仍发起停排 | 409 | `INTERRUPTION_EXISTS` |
 | 无进行中停排却恢复 | 409 | `NO_ACTIVE_INTERRUPTION` |
 | 停排期间执行登记 / 新签认 / 发布新版 | 409 | `INTERRUPTION_ACTIVE` |
@@ -1857,3 +1889,111 @@ wait
 | 写锁等待超过 `busy_timeout`（极端情况） | `500 INTERNAL`（现场写事务为毫秒级，正常部署不会出现；客户端可按 5xx 重试） |
 
 HTTP 接口字段、成功响应结构与既有错误码均未变化；前端无需为并发改造。
+
+## 二十、恢复后补填实际时刻的停排区间校验（本轮新增）
+
+**背景**：执行版停排恢复后，岗位常需在现场页手填已结束停排区间内的**实际开始 / 实际完成**时刻（补记）。原有登记只拦截「正在停排」（409 `INTERRUPTION_ACTIVE`），恢复后不再阻拦，导致**停排期间的时刻被写入现场登记**，进而污染顺延重算与复盘扣减。本轮在**既有** `POST /api/registrations` 写事务内增加按该版停排记录的时刻校验，**不新增接口、不改成功响应结构**。
+
+### 规则（start / complete；estimate 不适用）
+
+1. **半开区间 `[停排, 恢复)`**：手填时刻**等于停排时刻 → 拒绝**；**等于恢复时刻 → 允许**；对该版**全部停排段**（含已恢复的历史段；进行中的停排另有 409 拦截）逐一检查；
+2. **落入即整体拒绝**：返回 **400 `INTERRUPTION_TIME_CONFLICT`**，消息说明是实际开始还是实际完成、冲突时刻与所在停排段，响应另附机器可读字段：
+
+   | 字段 | 含义 |
+   | --- | --- |
+   | `conflictTime` / `conflictMinute` | 冲突时刻（`HH:MM` / 当日分钟数） |
+   | `pauseText` / `resumeText` | 命中停排段的停排 / 恢复时刻（进行中段 `resumeText=null`，正常不会到达此分支） |
+   | `interruptionId` | 命中停排段 id（对应 `interruptions[].id`） |
+3. **跨越停排允许**：实际开始与实际完成**都在段外**、但执行过程跨越停排（开始早于停排、完成晚于恢复）的登记**照常成功**；复盘继续按既有规则以**实际起止区间与已结束停排段（半开）的交集**扣减（多段先求并集只扣一次）；
+4. **失败零副作用**：拒绝在任何写入之前抛出，同一写事务回滚——**登记内容、登记行版本、放行双签效力、顺延变更待确认记录、更正历史均不变化**；
+5. **成功路径不变**：当前执行版、代班授权、行版本、双签门禁、时间先后（完成不早于开始等）、预计结束下界等既有校验与权限、成功响应结构（`{version: …}`）全部保留；停排进行中的登记仍先返回 409 `INTERRUPTION_ACTIVE`；
+6. **预计结束不受限**：`action=estimate` 登记的是计划值，不做停排区间拦截（下界校验口径不变）；舞监更正接口的区间校验为既有逻辑，本轮未改。
+
+### 页面行为
+
+- 提交被拒时现场页顶部显示**红色错误条**（消息即服务端文案，含冲突时刻与停排段），**不刷新、不关闭输入框**；岗位把时刻改填为停排前或恢复后的时刻**直接重试**即可（行版本未变，仍用页面所见 `rowVersion`）；
+- 启动、登录、发布与既有登记流程不受影响；输入框旁可结合 `GET /api/live` 返回的 `interruptions`（各段 `pauseText/resumeText`）提示可填时段。
+
+### HTTP API 调用示例
+
+以默认种子数据（第 1 版：L1 19:00 起、时长 5 分；账号见第三节）为例，端口 3000、会话 Cookie 复用：
+
+```bash
+# 灯光执行登录
+curl -c light.jar -X POST http://localhost:3000/api/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"light","password":"light123"}'
+# 舞监登录
+curl -c sm.jar -X POST http://localhost:3000/api/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"sm","password":"sm12345"}'
+
+# L1 19:00 实际开始（rowVersion 初始 1）
+curl -b light.jar -X POST http://localhost:3000/api/registrations \
+  -H 'Content-Type: application/json' \
+  -d '{"versionId":1,"cueRef":1,"rowVersion":1,"action":"start","time":"19:00"}'
+
+# 舞监停排 19:30、恢复 19:40
+curl -b sm.jar -X POST http://localhost:3000/api/live/interruptions \
+  -H 'Content-Type: application/json' \
+  -d '{"versionId":1,"pauseText":"19:30","reason":"舞台机械故障"}'
+curl -b sm.jar -X POST http://localhost:3000/api/live/interruptions/resume \
+  -H 'Content-Type: application/json' \
+  -d '{"versionId":1,"resumeText":"19:40"}'
+
+# ① 恢复后补填区间内的实际完成 19:35 → 400
+curl -b light.jar -i -X POST http://localhost:3000/api/registrations \
+  -H 'Content-Type: application/json' \
+  -d '{"versionId":1,"cueRef":1,"rowVersion":2,"action":"complete","time":"19:35"}'
+# HTTP/1.1 400 Bad Request
+# {"error":"INTERRUPTION_TIME_CONFLICT",
+#  "message":"实际完成 19:35 落入联排停排区间（19:30–19:40，半开区间：停排起点不可登记、恢复时刻可登记），停排期间没有实际执行，请改为停排前或恢复后的时刻后重新提交",
+#  "conflictTime":"19:35","conflictMinute":1175,
+#  "pauseText":"19:30","resumeText":"19:40","interruptionId":1}
+
+# ② 停排起点 19:30 → 同样 400 INTERRUPTION_TIME_CONFLICT（conflictTime="19:30"）
+
+# ③ 恢复时刻 19:40 → 200 成功（响应同既有登记：{"version":{…}}）
+curl -b light.jar -X POST http://localhost:3000/api/registrations \
+  -H 'Content-Type: application/json' \
+  -d '{"versionId":1,"cueRef":1,"rowVersion":2,"action":"complete","time":"19:40"}'
+```
+
+跨越停排的登记（开始在段外、完成也在段外）：
+
+```bash
+# 某提示项 19:00 已实际开始；经历 19:30–19:40 停排后，19:50 实际完成 → 200
+curl -b light.jar -X POST http://localhost:3000/api/registrations \
+  -H 'Content-Type: application/json' \
+  -d '{"versionId":1,"cueRef":4,"rowVersion":2,"action":"complete","time":"19:50"}'
+# 成功；复盘（GET /api/live/review）该项 actualDuration=50、deductedPause=10、netDuration=40。
+```
+
+补填实际开始落入历史停排段（未开始项，恢复后补记）：
+
+```bash
+# 音响为 S1 补填实际开始 19:35（19:30–19:40 段内）→ 400；改填 19:40（恢复时刻）→ 200
+curl -b sound.jar -X POST http://localhost:3000/api/registrations \
+  -H 'Content-Type: application/json' \
+  -d '{"versionId":1,"cueRef":2,"rowVersion":1,"action":"start","time":"19:35"}'
+# 400 INTERRUPTION_TIME_CONFLICT（label 为「实际开始」，conflictTime="19:35"）
+```
+
+失败的可观察结果（同一事务回滚，可用 `GET` 接口核对）：
+
+```bash
+# 登记行不变：L1 仍为 RUNNING、actualEndText=null、rowVer 未推进
+curl -b sm.jar http://localhost:3000/api/live | jq '.version.cues[]|select(.code=="L1")|{status,actualEndText,rowVer}'
+# {"status":"RUNNING","actualEndText":null,"rowVer":2}
+
+# 顺延待确认总数不增加；放行签认 active 状态不变；corrections 不新增
+curl -b sm.jar http://localhost:3000/api/live/change-notices | jq '.total'
+```
+
+| 场景 | HTTP | `error` |
+| --- | --- | --- |
+| 手填实际开始 / 完成落入任一段停排区间（含已恢复段；停排起点） | 400 | `INTERRUPTION_TIME_CONFLICT`（附 `conflictTime`、`pauseText`、`resumeText`、`interruptionId`） |
+| 手填时刻恰为恢复时刻；或起止均在段外（含跨越停排） | 200 | —（既有成功响应） |
+| 停排进行中提交任意登记 | 409 | `INTERRUPTION_ACTIVE`（既有，先于区间校验） |
+| 预计结束落入区间 | — | 不拦截（仅保留下界等既有校验） |
+| 行版本过期 / 越权 / 缺双签 / 完成早于开始等 | 409 / 403 / 400 | `VERSION_CONFLICT` / `FORBIDDEN` / `SIGNOFF_MISSING` / `BAD_INPUT`（既有） |
